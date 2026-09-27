@@ -1,0 +1,7 @@
+data/
+index/
+models/
+reports/
+.venv/
+tests/
+**/__pycache__/
