@@ -1,6 +1,6 @@
 # Face Recognizer Prototype — Session Brief
 
-> **For:** an unattended Claude Code cloud session (recommended model: **Opus 5.5**)
+> **For:** a Claude Code session (recommended model: **Opus 5.5**), run **locally** on the owner's Mac in the git worktree `../edp-face-recognizer`
 > **Branch:** `feat/face-recognizer-prototype` (from `main`)
 > **Spec:** [`docs/face-recognizer.md`](../docs/face-recognizer.md). Read its **Status & Corrections** section first; it overrides parts of the spec.
 
@@ -16,16 +16,18 @@ Build a standalone, CPU-only face recognition service. Then show, with measured 
 
 1. **Never commit any face photo or embedding.** The repo and its fork are **public**. Photos go in `face-recognizer/data/` and embeddings in `face-recognizer/index/`. Both must be git-ignored *before* any photo exists. Run `git status` before every commit and confirm that no image or `.npy`/`.json` index files are staged.
 2. **No student data, ever**, including names from the mock data used alongside face photos. The only enrolled identity is the owner: `owner` or a label they choose.
-3. **No third-party face APIs**, such as a cloud vision service. Inference runs locally in the session.
+3. **No third-party face APIs**, such as a cloud vision service. Inference runs locally on this machine.
 4. **Don't print, log, or write the owner's photos or embeddings** outside those two ignored folders. Reports contain only aggregate numbers and file *names*.
 5. **Don't push model weights to git.** Download them with a script and verify their checksums.
 6. **Stay inside `face-recognizer/`** and the two docs listed under Deliverables. Don't modify `src/`, `scanner/`, or other app code.
 
 ## Getting the owner's photos
 
-**The session can't receive photos through git.** If none are present when you start, **ask the owner how they want to provide them**, and build everything else in the meantime (see Milestones). Useful photos:
-- 10–20 photos, one face each, varied: frontal and slight angles, indoor and outdoor light, glasses on/off if applicable, different days.
-- Split: about 60% **enroll**, about 40% **held-out test**. Enrollment never sees the held-out photos.
+The owner copies 10–20 photos into **`face-recognizer/data/owner/`**, a local, git-ignored folder. Photos never leave the machine.
+- **The assistant must not open the photos** with its file-reading tool; that would send them off the machine. Only the local model reads them. The assistant works from aggregate outputs and file names.
+- Useful photos: one face each, varied (frontal and slight angles, indoor and outdoor light, glasses on/off if applicable, different days).
+- `scripts/evaluate.py` splits them deterministically (fixed seed): about 60% **enroll**, about 40% **held-out test**. Enrollment never sees the held-out photos.
+- If the folder is empty, build Milestones 1–3 first, then ask.
 
 ## Technical choices (already decided)
 
@@ -102,6 +104,10 @@ face-recognizer/
 - something would require breaking a hard rule
 - results look wrong: e.g. impostor scores overlapping heavily with genuine ones, which could point to a bug (misaligned crops, BGR vs. RGB) rather than the model
 
+## Optional bonus (after Milestone 5)
+
+**Live webcam check:** a minimal local page or script that grabs frames from the Mac's camera and shows the top match and score. It must follow the same rules: frames stay in memory, and nothing is written or committed.
+
 ## Out of scope tonight
 
-Live webcam or UI, integration with the attendance app, Supabase, the audit trail, the scanner dongle, children's photos, GPU/TensorRT, InsightFace (future benchmark only), and deployment anywhere.
+Integration with the attendance app, Supabase, the audit trail, the scanner dongle, children's photos, GPU/TensorRT, InsightFace (future benchmark only), and deployment anywhere.
