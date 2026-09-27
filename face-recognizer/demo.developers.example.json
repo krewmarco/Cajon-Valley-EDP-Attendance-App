@@ -1,0 +1,16 @@
+[
+  {
+    "slug": "owner",
+    "first_name": "Developer",
+    "last_name": "One",
+    "grade": "5",
+    "programs": ["ELOP"],
+    "yearbook_photo": "optional: file name in data/developers/owner/ to use as the card photo (default: sharpest)"
+  },
+  {
+    "slug": "dev2",
+    "first_name": "Developer",
+    "last_name": "Two",
+    "grade": "4"
+  }
+]
