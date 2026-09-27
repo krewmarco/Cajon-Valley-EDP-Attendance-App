@@ -1,0 +1,76 @@
+# Secrets come from scanner/.env (git-ignored). Copy .env.example to get started:
+#   cp scanner/.env.example scanner/.env
+#   docker compose -f scanner/docker-compose.yml up -d --build
+
+x-emulator-healthcheck: &emulator-healthcheck
+  test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/status"]
+  interval: 10s
+  timeout: 3s
+  retries: 3
+  start_period: 5s
+
+services:
+  # Virtual Scanner Dongle 1 (Podium 1 - Zebra Profile)
+  scanner-emulator-1:
+    build:
+      context: ./emulator
+      dockerfile: Dockerfile
+    container_name: edp-scanner-emulator-1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - STATION_ID=station-alpha-1
+      - AUTH_TOKEN=${SCANNER_AUTH_TOKEN:?Set SCANNER_AUTH_TOKEN in scanner/.env}
+      - PROFILE_NAME=Zebra DS2208 Barcode Scanner
+      - USB_VID=0x05E0
+      - USB_PID=0x1200
+      - DEFAULT_BURST_DELAY_MS=8
+    healthcheck: *emulator-healthcheck
+
+  # Virtual Scanner Dongle 2 (Classroom Station 2 - Honeywell Profile)
+  scanner-emulator-2:
+    build:
+      context: ./emulator
+      dockerfile: Dockerfile
+    container_name: edp-scanner-emulator-2
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - STATION_ID=station-alpha-2
+      - AUTH_TOKEN=${SCANNER_AUTH_TOKEN:?Set SCANNER_AUTH_TOKEN in scanner/.env}
+      - PROFILE_NAME=Honeywell Xenon 1900
+      - USB_VID=0x0C2E
+      - USB_PID=0x0BA1
+      - DEFAULT_BURST_DELAY_MS=10
+    healthcheck: *emulator-healthcheck
+
+  # Central Dongle Manager Service (Relay)
+  dongle-manager:
+    build:
+      context: ./manager
+      dockerfile: Dockerfile
+    container_name: edp-dongle-manager
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    environment:
+      - PORT=5050
+      - SCANNER_AUTH_TOKEN=${SCANNER_AUTH_TOKEN:?Set SCANNER_AUTH_TOKEN in scanner/.env}
+      - MANAGER_CLIENT_TOKEN=${MANAGER_CLIENT_TOKEN:?Set MANAGER_CLIENT_TOKEN in scanner/.env}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      - DONGLE_REGISTRY=station-alpha-1=http://scanner-emulator-1:8080,station-alpha-2=http://scanner-emulator-2:8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5050/api/v1/dongles"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      scanner-emulator-1:
+        condition: service_healthy
+      scanner-emulator-2:
+        condition: service_healthy

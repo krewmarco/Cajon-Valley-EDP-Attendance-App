@@ -1,0 +1,13 @@
+{
+  "name": "edp-dongle-manager",
+  "version": "1.0.0",
+  "description": "Central Dongle Manager Service and Multi-Station Relay",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

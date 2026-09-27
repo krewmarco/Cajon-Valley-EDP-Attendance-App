@@ -1,0 +1,14 @@
+{
+  "name": "edp-scanner-emulator",
+  "version": "1.0.0",
+  "description": "Virtual ESP32-S3 USB Barcode Scanner Emulator with REST, WebSockets, and Web UI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}
