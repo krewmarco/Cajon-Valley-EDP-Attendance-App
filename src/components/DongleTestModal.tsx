@@ -49,6 +49,12 @@ const DongleTestModal = ({ onClose, isLeadMode }: DongleTestModalProps) => {
             : { ok: false, text: res.reason === 'not_configured' ? res.message : (describeInjectFailure(res) ?? res.message) });
     };
 
+    const missing = [
+        !settings.managerUrl && 'manager URL',
+        !settings.clientToken && 'client token',
+        !settings.stationId && 'station ID',
+    ].filter(Boolean) as string[];
+
     const segment = (active: boolean): React.CSSProperties => ({
         flex: 1, padding: '10px', borderRadius: '10px', border: 'none', cursor: 'pointer', fontWeight: '800', fontSize: '13px',
         backgroundColor: active ? 'var(--text-main)' : 'var(--bg-hover)', color: active ? 'var(--bg-card)' : 'var(--text-main)',
@@ -69,15 +75,15 @@ const DongleTestModal = ({ onClose, isLeadMode }: DongleTestModalProps) => {
                         <legend style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-secondary)', padding: '0 6px' }}>Device settings</legend>
                         <div>
                             <label style={labelStyle} htmlFor="dongle-url">Dongle manager URL</label>
-                            <input id="dongle-url" style={inputStyle} value={settings.managerUrl} onChange={e => update('managerUrl', e.target.value.trim())} placeholder="http://localhost:5050" />
+                            <input id="dongle-url" style={inputStyle} value={settings.managerUrl} onChange={e => update('managerUrl', e.target.value.trim())} placeholder="e.g. http://localhost:5050" />
                         </div>
                         <div>
                             <label style={labelStyle} htmlFor="dongle-token">Client token</label>
-                            <input id="dongle-token" type="password" autoComplete="off" style={inputStyle} value={settings.clientToken} onChange={e => update('clientToken', e.target.value.trim())} placeholder="MANAGER_CLIENT_TOKEN" />
+                            <input id="dongle-token" type="password" autoComplete="off" style={inputStyle} value={settings.clientToken} onChange={e => update('clientToken', e.target.value.trim())} placeholder="MANAGER_CLIENT_TOKEN from scanner/.env" />
                         </div>
                         <div>
                             <label style={labelStyle} htmlFor="dongle-station">Station ID</label>
-                            <input id="dongle-station" style={inputStyle} value={settings.stationId} onChange={e => update('stationId', e.target.value.trim())} placeholder="station-alpha-1" />
+                            <input id="dongle-station" style={inputStyle} value={settings.stationId} onChange={e => update('stationId', e.target.value.trim())} placeholder="e.g. station-alpha-1" />
                         </div>
                         <div>
                             <span style={labelStyle}>ID typed on check-in</span>
@@ -113,6 +119,14 @@ const DongleTestModal = ({ onClose, isLeadMode }: DongleTestModalProps) => {
                         </button>
                     </div>
                 </div>
+
+                {missing.length > 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {isLeadMode
+                            ? `To test, enter the ${missing.join(', ')} above.`
+                            : 'Scanner is not set up on this device. Ask a Lead to configure it.'}
+                    </div>
+                )}
 
                 {result && (
                     <div role="status" style={{ padding: '10px 12px', borderRadius: '10px', fontSize: '13px', fontWeight: '600', backgroundColor: result.ok ? 'var(--color-success-bg)' : 'var(--color-warning-bg)', color: result.ok ? '#065f46' : '#92400e' }}>

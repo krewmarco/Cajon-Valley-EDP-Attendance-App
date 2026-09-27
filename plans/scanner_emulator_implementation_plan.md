@@ -273,7 +273,8 @@ Execute the pre-deployment verification protocol outlined in Section 7 of the sp
 3. [ ] **Google Docs Burst Rate Stress Test:**
    - Run a batch script sending 50 successive 10-character IDs with varying burst delays (`4ms`, `6ms`, `8ms`, `10ms`).
    - Identify the optimal burst speed that guarantees 0% dropped characters across all trials.
-4. [ ] **Power Cycle & Sleep/Wake Resilience:**
+4. [ ] **SIS confirmation & audit (issue #3):** find out whether the SIS portal can confirm a scanned ID was accepted, and decide whether the scan outcome belongs in the audit trail. Nothing is implemented until this is known.
+5. [ ] **Power Cycle & Sleep/Wake Resilience:**
    - Close the Chromebook lid for 2 minutes to induce low-power sleep.
    - Wake the device and execute an immediate injection to confirm USB connection re-acquisition.
 

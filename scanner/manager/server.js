@@ -93,6 +93,7 @@ function createManager(overrides = {}) {
 
     function requireClientAuth(req, res, next) {
         if (req.headers['x-manager-auth'] !== config.clientToken) {
+            console.log(`[RELAY] ${req.params.stationId} -> 401 (${req.headers['x-manager-auth'] ? 'wrong' : 'missing'} X-Manager-Auth)`);
             return res.status(401).json({ error: 'Unauthorized: Invalid or missing X-Manager-Auth token' });
         }
         next();
@@ -114,6 +115,7 @@ function createManager(overrides = {}) {
         const station = stations.get(stationId);
 
         if (!station) {
+            console.log(`[RELAY] ${stationId} -> 404 (not in DONGLE_REGISTRY)`);
             return res.status(404).json({ error: `Station '${stationId}' not found in registry.` });
         }
 
@@ -134,6 +136,7 @@ function createManager(overrides = {}) {
                 signal: AbortSignal.timeout(config.requestTimeoutMs)
             });
         } catch (err) {
+            console.log(`[RELAY] ${stationId} student=${student_id} -> FAILED (${err.message})`);
             return res.status(502).json({
                 relay: 'FAILED',
                 station_id: stationId,
@@ -142,6 +145,7 @@ function createManager(overrides = {}) {
         }
 
         const text = await forwardRes.text();
+        console.log(`[RELAY] ${stationId} student=${student_id} suffix=${suffix} -> ${forwardRes.ok ? 'SUCCESS' : 'REJECTED'} (dongle HTTP ${forwardRes.status})`);
         let data;
         try {
             data = JSON.parse(text);
