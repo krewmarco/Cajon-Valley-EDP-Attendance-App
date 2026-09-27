@@ -10,8 +10,16 @@ import type {
     Student
 } from './types';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Dev only: placeholders let the app start (with demo data) without a Supabase
+// project. Production builds keep failing fast on missing configuration.
+const DEV_PLACEHOLDER_URL = 'https://placeholder.supabase.co';
+const DEV_PLACEHOLDER_ANON_KEY = 'placeholder-anon-key';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || (import.meta.env.DEV ? DEV_PLACEHOLDER_URL : undefined);
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || (import.meta.env.DEV ? DEV_PLACEHOLDER_ANON_KEY : undefined);
+if (import.meta.env.DEV && supabaseUrl === DEV_PLACEHOLDER_URL) {
+    console.warn('[Supabase] VITE_SUPABASE_URL is not set; using a placeholder. Database calls will fail (demo data only).');
+}
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // =============================================================================

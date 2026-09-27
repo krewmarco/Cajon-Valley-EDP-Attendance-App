@@ -12,6 +12,10 @@ interface StaffLoginProps {
 }
 
 const StaffLogin = ({ onLogin, onToggleDemo, isDemoMode, staffList }: StaffLoginProps) => {
+    // Demo login shortcuts bypass authentication, so they only exist in dev builds
+    // (Vite replaces import.meta.env.DEV with false in production and drops them).
+    const allowDemoShortcuts = import.meta.env.DEV && isDemoMode;
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -61,7 +65,16 @@ const StaffLogin = ({ onLogin, onToggleDemo, isDemoMode, staffList }: StaffLogin
                 password,
             });
 
-            if (authError) throw authError;
+            if (authError) {
+                if (allowDemoShortcuts) {
+                    const staffMember = staffList.find(s => s.email === email);
+                    if (staffMember) {
+                        onLogin(staffMember);
+                        return;
+                    }
+                }
+                throw authError;
+            }
 
             const staffMember = staffList.find(s => s.email === email);
             const user = staffMember || {
@@ -313,6 +326,37 @@ const StaffLogin = ({ onLogin, onToggleDemo, isDemoMode, staffList }: StaffLogin
                     <span className="material-icons-round" style={{ color: isDemoMode ? '#8b5cf6' : 'var(--text-muted)' }}>{isDemoMode ? 'toggle_on' : 'toggle_off'}</span>
                     <span style={{ fontSize: '14px', fontWeight: '600', color: isDemoMode ? '#8b5cf6' : 'var(--text-muted)' }}>Enable Demo Mode</span>
                 </div>
+
+                {allowDemoShortcuts && (
+                    <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                            Quick Demo Accounts:
+                        </div>
+                        {staffList.map((staff) => (
+                            <button
+                                key={staff.id}
+                                type="button"
+                                onClick={() => onLogin(staff)}
+                                style={{
+                                    padding: '10px 14px',
+                                    borderRadius: 'var(--radius-lg)',
+                                    border: '1px solid var(--border-subtle)',
+                                    backgroundColor: 'var(--bg-card)',
+                                    color: 'var(--text-main)',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                }}
+                            >
+                                <span>{staff.name} ({staff.role})</span>
+                                <span className="material-icons-round" style={{ fontSize: '16px', color: '#8b5cf6' }}>login</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );
