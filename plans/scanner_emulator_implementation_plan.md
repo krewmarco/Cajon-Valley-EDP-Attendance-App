@@ -16,12 +16,12 @@ Automated tests (all passing): `pio test -e native` (9), `test_timing_analysis.p
 | **2** Network & Security (firmware) | 🔴 Not started (only sanitizer + cooldown exist, from Phase 1) | — |
 | **3** Injection APIs (firmware) | 🔴 Not started on ESP32 · 🟡 Simulated in Node | `scanner/emulator/server.js` |
 | **4** Dongle Manager | 🟢 Done for emulators (relay, auth, healthchecks); untested with real dongles | `scanner/manager/server.js`, `scanner/docker-compose.yml` |
-| **5** App Integration | 🔴 Not started (`src/services/scannerDongleService.ts` does not exist) | — |
+| **5** App Integration | 🟢 Done against emulators; not yet tried on real hardware / production HTTPS | `src/services/scannerDongleService.ts`, `src/components/DongleStatusPill.tsx`, `src/components/DongleTestModal.tsx`, `src/App.tsx` |
 | **6** Chromebook Field Validation | 🔴 Not started | — |
 
 ### Recommended next steps
 1. Flash Phase 1 and run the Phase 1 hardware checks.
-2. Use the Docker emulator stack to build Phase 5 (app integration) — that work doesn't need hardware.
+2. Decide how production (HTTPS) devices reach the manager (see Phase 5 → Open issues).
 3. Build the Phase 2/3 firmware so it matches the API the emulator already exposes (the emulator is the reference).
 
 ---
@@ -44,7 +44,7 @@ flowchart TD
 
     subgraph Infrastructure["Infrastructure & Integration"]
         P4["Phase 4: Docker Dongle Manager 🟢<br/>- Multi-station Registry<br/>- Heartbeat Telemetry<br/>- Central REST Relay"]
-        P5["Phase 5: App Integration & Test Harness 🔴<br/>- EDP Web App Status Badge<br/>- Check-In Dispatch Hook<br/>- Standalone Test Tool"]
+        P5["Phase 5: App Integration & Test Harness 🟢<br/>- EDP Web App Status Badge<br/>- Check-In Dispatch Hook<br/>- Standalone Test Tool"]
         P3 --> P4
         EMU -. "stands in for P3 during dev" .-> P4
         P4 --> P5
@@ -217,30 +217,43 @@ Create a lightweight containerized relay service that allows client applications
 
 ## Phase 5: Client App Integration & Test Harness
 
-> **Status: 🔴 Not started.** There is no dongle or scanner code in `src/`. This can proceed now against the Docker emulator stack.
+> **Status: 🟢 Implemented (2026-09-26)** and verified in the browser against the emulator + manager. Not yet tested with real hardware or from the production HTTPS deployment.
 
 ### Objective
 Integrate dongle status monitoring and keystroke triggering directly into the existing attendance application workflows and provide a standalone testing UI for staff training.
 
 ### Tasks
-1. [ ] **Frontend Service Hook (`src/services/scannerDongleService.ts`):**
-   - Implement a TypeScript client that talks to the Phase 4 manager (`GET /api/v1/dongles`, `POST /api/v1/dongles/:stationId/inject` with `X-Manager-Auth`). Treat `relay: REJECTED` (esp. 429/503) and `FAILED` as non-fatal.
-   - Add graceful degradation: if the dongle is offline or unreachable, the app logs a warning and proceeds with database check-in without freezing the UI.
-   - Configure the manager URL and station ID via env (`VITE_…`).
-2. [ ] **Attendance App Trigger Integration:**
-   - In [`src/App.tsx`](file:///Users/ball/Documents/Projects/Cajon-Valley-EDP-Attendance-App/src/App.tsx) and student check-in handlers, trigger the scanner emulator upon confirmation:
-     ```ts
-     await injectStudentBarcode(student.id, { suffix: 'ENTER' });
-     ```
-3. [ ] **Attendant Dongle Status Indicator:**
-   - Add a subtle status pill in the app header showing current dongle connectivity (`Dongle: Ready` [Green], `Sending...` [Purple], `Offline` [Gray]).
-4. [ ] **Standalone Hardware Test Tool:**
-   - Create a lightweight test modal / page in the app where attendants can enter an arbitrary ID, adjust burst delay sliders (`4ms - 20ms`), select `Enter` vs `Tab`, and test injection with one click. The emulator and manager web UIs are useful references.
+1. ✅ **Frontend Service (`src/services/scannerDongleService.ts`):**
+   - A client for the Phase 4 manager: `injectBarcode` / `injectStudentBarcode` (`POST /api/v1/dongles/:stationId/inject` with `X-Manager-Auth`) and `refreshDongleStatus` (`GET /api/v1/dongles`).
+   - Graceful degradation: nothing throws. There is a 3 s timeout, and failures come back as `{ok:false, reason}` (`not_configured` · `no_barcode` · `offline` · `rejected` + status). `describeInjectFailure` maps these to staff wording, e.g. `Dongle offline - check-in recorded locally`, `Scanner not plugged in…` (503), `Scanner busy…` (429).
+   - **Settings are per device** (manager URL, client token, station ID, suffix, speed, ID field), stored in `localStorage` under `edp.scannerDongle.settings`. `VITE_SCANNER_MANAGER_URL` / `_TOKEN` / `_STATION_ID` are dev defaults only; a VITE token would ship in the public bundle. With no settings, the service is a no-op.
+   - **ID typed:** `elopId` by default (every student has one, and roster search uses it), switchable to `asesId`. It is sanitized to `[a-zA-Z0-9-]` like the firmware.
+2. ✅ **Check-In Trigger** (`handleCheckIn` in `src/App.tsx`): the scan starts at the beginning of check-in for minimal latency and never blocks it. A failure warning toast is attached after the success toast so it is the one staff see.
+3. ✅ **Status Pill** (`DongleStatusPill`, in the header): `Ready` (green) · `Sending...` (purple) · `Offline` (gray) · `Unplugged` (amber, USB not mounted). It polls every 15 s. When unconfigured, only Lead mode sees a gray `Scanner` setup button; staff see nothing.
+4. ✅ **Test Tool** (`DongleTestModal`, opened from the pill): test ID, 4–20 ms burst-delay slider, Enter/Tab, one-click Test Scan. The device settings section is Lead-only.
+
+### Tests
+- `npm test` (Vitest, `src/**/*.test.ts`):
+  - `scannerDongleService.test.ts`: 22 unit tests (mocked fetch): settings, sanitizing, every failure mapping, the `sending` state.
+  - `scannerDongleService.contract.test.ts`: 7 tests against the **real** `scanner/manager` + `scanner/emulator` in-process (success typed on the dongle, 429 cooldown, 503 unplugged, 502 unreachable, 401, 404). They are skipped if `scanner/*/node_modules` isn't installed.
+- Browser check (demo mode, Lead):
+  - The pill showed `Scanner` → `Ready` after configuring.
+  - Checking in Ava Smith made the emulator record `1002 ENTER` on `station-alpha-1` (her ELOP ID).
+  - With the emulator stopped, checking in Charlotte still succeeded, showed `Dongle offline - check-in recorded locally`, and turned the pill `Offline`.
+
+### Open issues
+- [ ] **Production HTTPS → LAN manager.** Browsers block an `https://` page from calling `http://<LAN-IP>:5050` (mixed content / Private Network Access). `http://localhost` is exempt. Options:
+  - run the manager on each device, or
+  - put the manager behind HTTPS on the school network, or
+  - relay through a backend (e.g. a Supabase Edge Function or the existing server) that can reach it.
+- [ ] Onboarding: someone has to enter the manager URL, token, and station in the pill's settings on each check-in device.
+- [ ] Only check-in triggers a scan. Decide whether check-out should too (the SIS portal flow is still to be confirmed in Phase 6).
+- [ ] The `Toast` component clears on a fixed 3 s timer shared by all toasts (pre-existing), so a quick second toast can be cut short.
 
 ### Verification & Testing
-- [ ] Launch the attendance app (`npm run dev`) in the browser with the Docker stack running.
-- [ ] Perform a simulated student check-in and verify that the emulator UI receives the scan.
-- [ ] Stop the emulator and perform a check-in. Verify that the attendance app shows a non-blocking toast warning (`Dongle offline - check-in recorded locally`) and remains functional.
+- [x] Launch the attendance app with the emulator + manager running, configure the device, and check in a student; the emulator receives the scan.
+- [x] Stop the emulator and check in; the app shows `Dongle offline - check-in recorded locally` and stays functional.
+- [ ] Repeat on a real dongle and Chromebook (Phase 6).
 
 ---
 
@@ -281,5 +294,5 @@ Execute the pre-deployment verification protocol outlined in Section 7 of the sp
 | **Phase 2** | Network & Security | Wi-Fi, mDNS & Token verification | Ping `esp32-scanner-01.local`, reject invalid token | 🔴 Not started |
 | **Phase 3** | Injection APIs | REST & WebSocket injection endpoints | `curl` POST command $\rightarrow$ types ID into host window | 🔴 Firmware / 🟡 Emulator |
 | **Phase 4** | Dongle Manager | Docker relay service for multi-room | Relay API coordinates multiple registered dongles | 🟢 Done (emulators) |
-| **Phase 5** | App Integration | Attendance app check-in hook & status UI | App check-in button $\rightarrow$ triggers USB scan | 🔴 Not started |
+| **Phase 5** | App Integration | Attendance app check-in hook & status UI | App check-in button $\rightarrow$ triggers USB scan | 🟢 Done (emulators) |
 | **Phase 6** | Field Validation | Chromebook inspection & portal tuning | 50-scan stress test in live SIS portal without dropouts | 🔴 Not started |

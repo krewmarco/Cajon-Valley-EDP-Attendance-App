@@ -14,6 +14,9 @@ import StudentDetailModal from './components/StudentDetailModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import LeaderDashboard from './components/LeaderDashboard';
 import ParentReportModal from './components/ParentReportModal';
+import DongleStatusPill from './components/DongleStatusPill';
+import DongleTestModal from './components/DongleTestModal';
+import { injectStudentBarcode, describeInjectFailure } from './services/scannerDongleService';
 
 const App = () => {
     const [staffList, setStaffList] = useState<Staff[]>(INITIAL_STAFF);
@@ -38,6 +41,7 @@ const App = () => {
     const [biometricLogs, setBiometricLogs] = useState<BiometricLog[]>([]);
     const [rosterStatusFilter, setRosterStatusFilter] = useState<'all' | 'checked_in' | 'checked_out'>('all');
     const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+    const [showDongleModal, setShowDongleModal] = useState(false);
 
     // Fetch initial data from Supabase
     useEffect(() => {
@@ -212,6 +216,11 @@ const App = () => {
         const timeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
         const staffName = user ? `${user.name} (${user.organization})` : 'Staff';
 
+        // Type the student's ID into the SIS portal via the scanner dongle.
+        // Started first for minimal latency; never blocks the check-in.
+        const scanTarget = students.find(s => s.id === studentId);
+        const scanPromise = scanTarget ? injectStudentBarcode(scanTarget) : null;
+
         setStudents(prev => prev.map(s => {
             if (s.id === studentId) {
                 const update = program === 'sunrise'
@@ -265,6 +274,11 @@ const App = () => {
                 PasskeyService.uploadToDrive(photo || '', studentId);
             }
         }
+        // Attached after the success toast so a dongle warning is shown last
+        scanPromise?.then(result => {
+            const warning = describeInjectFailure(result);
+            if (warning) showToast(warning, 'warning');
+        });
         setShowConfirmId(null);
         setSearchQuery('');
     };
@@ -412,6 +426,7 @@ const App = () => {
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <DongleStatusPill onOpen={() => setShowDongleModal(true)} isLeadMode={isLeadMode} />
                         <div onClick={() => setIsLeadMode(!isLeadMode)} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', borderRadius: '16px', backgroundColor: isLeadMode ? 'rgba(139,92,246,0.1)' : 'var(--bg-hover)', border: `1px solid ${isLeadMode ? '#8b5cf6' : 'var(--border-subtle)'}`, cursor: 'pointer' }}>
                             <span className="material-icons-round" style={{ fontSize: '16px', color: isLeadMode ? '#8b5cf6' : 'var(--text-secondary)' }}>{isLeadMode ? 'admin_panel_settings' : 'person'}</span>
                             <span style={{ fontSize: '11px', fontWeight: '700', color: isLeadMode ? '#8b5cf6' : 'var(--text-secondary)' }}>{isLeadMode ? 'LEAD' : 'STAFF'}</span>
@@ -543,6 +558,11 @@ const App = () => {
 
             {reportData && (
                 <ParentReportModal student={reportData.student} type={reportData.type} onClose={() => setReportData(null)} onSend={(report) => { setParentReports(prev => [...prev, report]); showToast('Report sent!', 'success'); setReportData(null); }} onSaveDraft={(report) => { setParentReports(prev => [...prev, report]); showToast('Draft saved!', 'info'); setReportData(null); }} staffId={user?.id || 'unknown'} />
+            )}
+
+            {showDongleModal && createPortal(
+                <DongleTestModal onClose={() => setShowDongleModal(false)} isLeadMode={isLeadMode} />,
+                document.body
             )}
 
             {toast && <Toast message={toast.msg} type={toast.type} />}
