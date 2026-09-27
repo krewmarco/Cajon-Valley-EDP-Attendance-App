@@ -1,0 +1,11 @@
+# Supabase
+.branches
+.temp
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local
+
+# Generated demo roster (face-recognizer/scripts/build_demo_class.py)
+seed.demo.sql
