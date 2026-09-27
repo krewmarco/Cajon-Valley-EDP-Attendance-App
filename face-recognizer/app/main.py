@@ -25,10 +25,11 @@ MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 class Settings:
     models_dir: Path = field(default_factory=lambda: Path(os.environ.get("MODELS_DIR", ROOT / "models")))
     index_dir: Path | None = field(default_factory=lambda: Path(os.environ.get("INDEX_DIR", ROOT / "index")))
-    # SFace cosine thresholds. OpenCV's reference "same person" value is 0.363;
-    # calibrate with scripts/evaluate.py before relying on them.
-    match_threshold: float = float(os.environ.get("MATCH_THRESHOLD", "0.363"))
-    high_threshold: float = float(os.environ.get("HIGH_THRESHOLD", "0.5"))
+    # SFace cosine thresholds from reports/evaluation.md (one adult owner vs 500
+    # LFW impostors): impostors peaked at 0.383, the owner's held-out photos
+    # scored 0.733+. Re-measure on the target population before real use.
+    match_threshold: float = float(os.environ.get("MATCH_THRESHOLD", "0.40"))
+    high_threshold: float = float(os.environ.get("HIGH_THRESHOLD", "0.60"))
 
 
 def confidence_level(score: float, settings: Settings) -> str:

@@ -60,7 +60,11 @@ curl -s -F frame=@some-photo.jpg localhost:8000/api/v1/recognize
 | `POST /api/v1/recognize` (`frame`, `max_candidates`) | top matches with `score` and `confidence_level` |
 | `DELETE /api/v1/enroll/{label}` | delete a label's embeddings |
 
-Thresholds come from `MATCH_THRESHOLD` / `HIGH_THRESHOLD` (defaults 0.363 / 0.5). The default match value is OpenCV's reference; set it from your evaluation report.
+Thresholds come from `MATCH_THRESHOLD` / `HIGH_THRESHOLD`, with defaults **0.40 / 0.60** from [`reports/evaluation.md`](reports/evaluation.md). They are measured on one adult, so re-measure before any other use.
+
+## Detection scale
+
+YuNet runs on a copy downscaled to 640 px on the long side, and the box and landmarks are mapped back, so alignment and embedding use full resolution. On full-size (1600 px) iPhone portraits, the owner's large faces scored 0.84–0.90, just under the 0.9 detection cutoff, so 11 of 12 went undetected. At 640 px they score 0.91–0.94, with no extra faces and no change on LFW.
 
 ## Quality gates (enrollment)
 

@@ -22,6 +22,21 @@
    - The UI (§5.3) must use the app's inline-style conventions; the app doesn't use Tailwind.
    - The app's existing check-in "face verification" is a mock (`ConfirmationModal` / `MockDatabase`, with a hardcoded 0.92 score). That is where a real recognizer would plug in.
 
+### Prototype results (2026-09-27)
+
+A standalone prototype (`face-recognizer/`, OpenCV YuNet + SFace on CPU) was measured with **one adult, the project owner, with consent**: 12 iPhone photos (7 enrolled, 5 held out) against 500 LFW photos of other people. Full numbers are in [`face-recognizer/reports/evaluation.md`](../face-recognizer/reports/evaluation.md).
+
+| | Result |
+|---|---|
+| Owner's held-out photos recognized | 5 / 5, scores 0.733–0.832 |
+| Other people (impostors) | max score 0.383, mean 0.162 |
+| Threshold with no false accepts | **0.40**. 0 of 499 impostors matched; the 95% upper bound on the false-accept rate is about 0.6% |
+| Speed | about 10 ms per photo (detect + embed) on a laptop CPU |
+
+What this does and doesn't show: the pipeline works end to end, and one adult is clearly separable from 500 other adults. It says nothing about children, live podium frames, or accuracy across a school population, so those need their own measurement after the approvals in item 4. Two spec values were changed based on measurements:
+- The sharpness gate is 40 on a normalized face crop; 100 would reject about half of sharp photos.
+- Detection runs at 640 px; at full resolution, large faces fell below the confidence cutoff.
+
 ---
 
 ## 1. System Overview & Workflow

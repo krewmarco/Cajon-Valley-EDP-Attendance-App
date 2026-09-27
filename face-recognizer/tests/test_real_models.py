@@ -68,3 +68,14 @@ def test_blank_image_has_no_face(embedder):
     blank = np.full((480, 640, 3), 128, np.uint8)
     assert embedder.detect(blank) == []
     assert check_enrollment_quality(blank, []).reason == "no_face"
+
+
+def test_detection_coordinates_map_back_to_full_resolution(embedder):
+    [a, _] = people_with_two_photos(1)[0]
+    base = load(a)                                  # 500x500
+    big = cv2.resize(base, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)  # 2000x2000, detected at 640
+    f_base, f_big = embedder.detect(base)[0], embedder.detect(big)[0]
+    assert f_big.width == pytest.approx(4 * f_base.width, rel=0.1)
+    assert f_big.x == pytest.approx(4 * f_base.x, abs=4 * 8)
+    # alignment on the big image uses mapped landmarks, so the identity is preserved
+    assert float(embedder.embed(base, f_base) @ embedder.embed(big, f_big)) > 0.9

@@ -11,6 +11,11 @@ import cv2
 import numpy as np
 
 YUNET_FILE = "face_detection_yunet_2023mar.onnx"
+# YuNet is less confident on very large faces: on 1600px phone portraits the
+# owner's faces scored 0.84-0.90 (below the 0.9 cutoff) but 0.91-0.94 when
+# detected at 640px. Detect on a downscaled copy, then map coordinates back so
+# alignment and embedding still use the full-resolution image.
+DETECT_MAX_SIDE = 640
 SFACE_FILE = "face_recognition_sface_2021dec.onnx"
 
 
@@ -56,11 +61,17 @@ class OpenCVSFaceEmbedder:
 
     def detect(self, image_bgr: np.ndarray) -> list[DetectedFace]:
         height, width = image_bgr.shape[:2]
+        scale = min(1.0, DETECT_MAX_SIDE / max(height, width))
+        small = image_bgr if scale == 1.0 else cv2.resize(
+            image_bgr, (round(width * scale), round(height * scale)), interpolation=cv2.INTER_AREA
+        )
         with self._lock:
-            self._detector.setInputSize((width, height))
-            _, rows = self._detector.detect(image_bgr)
+            self._detector.setInputSize((small.shape[1], small.shape[0]))
+            _, rows = self._detector.detect(small)
         if rows is None:
             return []
+        rows = rows.copy()
+        rows[:, :14] /= scale  # box (x, y, w, h) + 5 landmarks back to full resolution; col 14 is the score
         faces = [
             DetectedFace(
                 x=int(row[0]), y=int(row[1]), width=int(row[2]), height=int(row[3]),
