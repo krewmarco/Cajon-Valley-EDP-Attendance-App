@@ -62,6 +62,18 @@ curl -s -F frame=@some-photo.jpg localhost:8000/api/v1/recognize
 
 Thresholds come from `MATCH_THRESHOLD` / `HIGH_THRESHOLD`, with defaults **0.40 / 0.60** from [`reports/evaluation.md`](reports/evaluation.md). They are measured on one adult, so re-measure before any other use.
 
+## Live webcam test (dev only)
+
+```bash
+.venv/bin/python scripts/enroll.py --label owner data/owner
+LIVE_DEMO=1 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+# open http://localhost:8000/live and allow the camera
+```
+
+The page captures a frame every 500 ms in the browser, posts it to `/api/v1/recognize`, and draws the face box with the top match, score, and level, plus running stats. Frames are scored in memory and discarded. With `LIVE_DEMO=1` the server logs one line per frame (`face=<px> top=<label> score=<s> level=<L> ms=<t>`, **no images**). `/live` returns 404 unless `LIVE_DEMO=1`. Bind to `127.0.0.1` so it isn't reachable from the network.
+
+First session (owner only, varied poses and lighting): 74 frames, 67 with a face detected, of which 59 HIGH, 8 MODERATE, 0 below the 0.40 match threshold. Scores 0.478–0.792 (median 0.700), about 36 ms per frame on the server. **There's no liveness check:** a photo of an enrolled person held up to the camera is expected to match.
+
 ## Detection scale
 
 YuNet runs on a copy downscaled to 640 px on the long side, and the box and landmarks are mapped back, so alignment and embedding use full resolution. On full-size (1600 px) iPhone portraits, the owner's large faces scored 0.84–0.90, just under the 0.9 detection cutoff, so 11 of 12 went undetected. At 640 px they score 0.91–0.94, with no extra faces and no change on LFW.

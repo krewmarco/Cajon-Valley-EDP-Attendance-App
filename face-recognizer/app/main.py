@@ -4,20 +4,24 @@ Run:  uvicorn app.main:app --port 8000
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from starlette.formparsers import MultiPartParser
 
 from .embedder import Embedder, OpenCVSFaceEmbedder
 from .images import ImageDecodeError, decode_image
 from .index import EmbeddingIndex
+from .live import LIVE_PAGE
 from .quality import check_enrollment_quality
 
 ROOT = Path(__file__).resolve().parent.parent
+log = logging.getLogger("uvicorn.error")
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
@@ -30,6 +34,8 @@ class Settings:
     # scored 0.733+. Re-measure on the target population before real use.
     match_threshold: float = float(os.environ.get("MATCH_THRESHOLD", "0.40"))
     high_threshold: float = float(os.environ.get("HIGH_THRESHOLD", "0.60"))
+    # Dev-only webcam test page at /live; also logs per-frame scores (never images)
+    live_demo: bool = os.environ.get("LIVE_DEMO") == "1"
 
 
 def confidence_level(score: float, settings: Settings) -> str:
@@ -102,11 +108,21 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
 
         faces = embedder.detect(image)
         if not faces:
-            return {"face_detected": False, "bounding_box": None, "candidates": [],
-                    "inference_time_ms": round((time.perf_counter() - started) * 1000, 1)}
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            if settings.live_demo:
+                log.info("recognize face=none ms=%s", elapsed)
+            return {"face_detected": False, "bounding_box": None, "candidates": [], "inference_time_ms": elapsed}
 
         face = faces[0]  # largest face in frame
         matches = index.search(embedder.embed(image, face), k=max(1, min(max_candidates, 10)))
+        if settings.live_demo:  # scores only, never images
+            top = matches[0] if matches else None
+            log.info(
+                "recognize face=%dpx top=%s score=%s level=%s ms=%s",
+                face.width, top.label if top else "-", f"{top.score:.3f}" if top else "-",
+                confidence_level(top.score, settings) if top else "-",
+                round((time.perf_counter() - started) * 1000, 1),
+            )
         return {
             "face_detected": True,
             "bounding_box": {"x": face.x, "y": face.y, "width": face.width, "height": face.height},
@@ -116,6 +132,12 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             ],
             "inference_time_ms": round((time.perf_counter() - started) * 1000, 1),
         }
+
+    @app.get("/live", response_class=HTMLResponse, include_in_schema=False)
+    def live_page():
+        if not settings.live_demo:
+            raise HTTPException(404, "Live demo is disabled; start the service with LIVE_DEMO=1")
+        return LIVE_PAGE
 
     @app.delete("/api/v1/enroll/{label}")
     def delete_label(label: str):

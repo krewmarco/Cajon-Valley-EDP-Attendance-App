@@ -32,6 +32,9 @@ A standalone prototype (`face-recognizer/`, OpenCV YuNet + SFace on CPU) was mea
 | Other people (impostors) | max score 0.383, mean 0.162 |
 | Threshold with no false accepts | **0.40**. 0 of 499 impostors matched; the 95% upper bound on the false-accept rate is about 0.6% |
 | Speed | about 10 ms per photo (detect + embed) on a laptop CPU |
+| Live webcam (owner) | 67 frames with a face: 59 HIGH, 8 MODERATE, 0 below threshold; scores 0.478–0.792; about 36 ms per frame |
+
+The prototype has **no liveness / anti-spoofing check**, so a photo held up to the camera can match. A production system would need one before any unattended use, and it's still worth having with a human in the loop.
 
 What this does and doesn't show: the pipeline works end to end, and one adult is clearly separable from 500 other adults. It says nothing about children, live podium frames, or accuracy across a school population, so those need their own measurement after the approvals in item 4. Two spec values were changed based on measurements:
 - The sharpness gate is 40 on a normalized face crop; 100 would reject about half of sharp photos.

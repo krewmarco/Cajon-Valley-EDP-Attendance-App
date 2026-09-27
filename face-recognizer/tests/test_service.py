@@ -191,3 +191,29 @@ def test_index_rejects_mismatched_dimensions():
     index.add("a", np.ones(4, np.float32), "a")
     with pytest.raises(ValueError):
         index.add("b", np.ones(8, np.float32), "b")
+
+
+# ── live demo page ────────────────────────────────────────────────────────
+def test_live_page_is_off_by_default(fake_embedder):
+    assert make_client(fake_embedder).get("/live").status_code == 404
+
+
+def test_live_page_is_self_contained_when_enabled(fake_embedder):
+    client = TestClient(create_app(Settings(index_dir=None, live_demo=True), embedder=fake_embedder))
+    res = client.get("/live")
+    assert res.status_code == 200 and "getUserMedia" in res.text
+    # no external scripts/styles/fonts: frames only ever go to this service
+    assert "src=\"http" not in res.text and "href=\"http" not in res.text and "@import" not in res.text
+    assert "/api/v1/recognize" in res.text
+
+
+def test_live_mode_logs_scores_but_not_images(fake_embedder, caplog):
+    client = TestClient(create_app(Settings(index_dir=None, live_demo=True), embedder=fake_embedder))
+    enroll(client, "owner", [synthetic_face_image(7)])
+    with caplog.at_level("INFO", logger="uvicorn.error"):
+        recognize(client, synthetic_face_image(7))
+        recognize(client, synthetic_face_image(7, faces=0))
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("recognize")]
+    assert lines[0].startswith("recognize face=200px top=owner score=") and "level=HIGH" in lines[0]
+    assert lines[1].startswith("recognize face=none")
+    assert all(len(line) < 200 for line in lines)
