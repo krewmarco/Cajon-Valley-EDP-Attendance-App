@@ -1,18 +1,17 @@
 /**
  * src/services/googleDriveService.ts
  *
- * EDP Attendance App — Google Drive Audit Sync Service
- * =====================================================
- * Sends structured audit events to the EDP_StudentSync Google Apps Script
- * web app, which creates/updates Google Drive folders and Docs for every
- * student action in real time.
+ * EDP Attendance App — Audit Trail Events
+ * =======================================
+ * Builds a structured audit event for every student action and hands it to
+ * the audit log (src/services/audit/auditLog.ts), which fans it out to the
+ * configured providers:
+ *   google-docs — EDP_StudentSync Google Apps Script → per-student Google Docs
+ *                 (VITE_GAS_WEBHOOK_URL, see docs/GOOGLE_DRIVE_SETUP.md)
+ *   local       — logs/dev-audit.jsonl via the Vite dev server (dev mode)
+ * With no providers configured, every function is a no-op.
  *
- * ACTIVATION:
- *   Add VITE_GAS_WEBHOOK_URL to your .env file (see docs/GOOGLE_DRIVE_SETUP.md).
- *   If the env var is unset, every function silently no-ops — the app runs
- *   exactly as it does today.
- *
- * USAGE (wire in to existing event handlers, no existing code changes required):
+ * USAGE (called from the event handlers in App.tsx):
  *   import { gdLogCheckIn } from './services/googleDriveService';
  *   // Call after the Supabase update succeeds:
  *   gdLogCheckIn(student, currentStaff, 'sunrise');
@@ -39,18 +38,8 @@ import type {
     ProgramType,
 } from '../types';
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-const GAS_URL: string = import.meta.env.VITE_GAS_WEBHOOK_URL ?? '';
-
-/**
- * Base payload appended to every event for full auditability.
- */
-interface AuditMeta {
-    app_version: string;
-    sent_at: string;          // ISO timestamp (device clock)
-    event_type: string;
-}
+import { recordAuditEvent } from './audit/auditLog';
+import type { AuditEventType } from './audit/types';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -70,33 +59,9 @@ function timeLabel(): string {
     });
 }
 
-/**
- * Fire-and-forget POST to the GAS web app.
- * Fails silently — never blocks or crashes the UI.
- */
-async function postEvent(
-    eventType: string,
-    payload: Record<string, unknown>,
-): Promise<void> {
-    if (!GAS_URL) return; // Not configured — graceful no-op
-
-    const meta: AuditMeta = {
-        app_version: '1.0.0',
-        sent_at: nowISO(),
-        event_type: eventType,
-    };
-
-    try {
-        await fetch(GAS_URL, {
-            method: 'POST',
-            // GAS requires text/plain or no CORS preflight; JSON body is parsed inside GAS
-            headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify({ ...meta, ...payload }),
-        });
-    } catch (err) {
-        // Log locally but never surface to the user
-        console.warn('[GDrive] Sync failed silently:', err);
-    }
+/** Fire-and-forget; never blocks or crashes the UI. */
+function postEvent(eventType: AuditEventType, payload: Record<string, unknown>): Promise<void> {
+    return recordAuditEvent(eventType, payload);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
