@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLocalAuditProvider } from '../src/services/audit/localAuditProvider';
-import { createDevAuditLogHandler, readDevAuditLog } from './devAuditLog';
+import { createDevLogHandler, devAuditLog, readDevAuditLog } from './devAuditLog';
 
 let dir: string;
 let logFile: string;
@@ -14,7 +14,7 @@ let baseUrl: string;
 beforeAll(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-audit-'));
     logFile = path.join(dir, 'nested', 'dev-audit.jsonl');
-    const handler = createDevAuditLogHandler(logFile);
+    const handler = createDevLogHandler(logFile);
     server = http.createServer((req, res) => { void handler(req, res); });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -68,5 +68,23 @@ describe('dev audit log endpoint', () => {
         expect(readDevAuditLog(logFile)).toEqual([
             expect.objectContaining({ event_type: 'PHOTO_UPLOAD', photo_base64: '<base64 image, 4 chars>' }),
         ]);
+    });
+});
+
+describe('devAuditLog plugin', () => {
+    it('registers separate audit and scanner endpoints writing to separate files', () => {
+        const uses: [string, unknown][] = [];
+        const server = {
+            config: { root: '/project', logger: { info: vi.fn() } },
+            middlewares: { use: (endpoint: string, handler: unknown) => uses.push([endpoint, handler]) },
+        };
+        const plugin = devAuditLog();
+        expect(plugin.apply).toBe('serve');
+        (plugin.configureServer as (s: unknown) => void)(server);
+
+        expect(uses.map(([endpoint]) => endpoint)).toEqual(['/__dev/audit-log', '/__dev/scanner-log']);
+        const logged = server.config.logger.info.mock.calls.map(([msg]: [string]) => msg).join('\n');
+        expect(logged).toContain('dev-audit.jsonl');
+        expect(logged).toContain('dev-scanner.jsonl');
     });
 });

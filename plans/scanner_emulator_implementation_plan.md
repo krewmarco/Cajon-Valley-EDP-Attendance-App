@@ -241,6 +241,11 @@ Integrate dongle status monitoring and keystroke triggering directly into the ex
   - Checking in Ava Smith made the emulator record `1002 ENTER` on `station-alpha-1` (her ELOP ID).
   - With the emulator stopped, checking in Charlotte still succeeded, showed `Dongle offline - check-in recorded locally`, and turned the pill `Offline`.
 
+### Dev diagnostics
+- `logs/dev-scanner.jsonl` (dev only) records every `SCAN` (test or check-in), `STATUS_CHANGE`, and `SETTINGS_SAVED` event.
+- Each scan's `request_id` travels as `X-Request-Id` through the manager's `[RELAY]` log and into the emulator's scan history, so one scan can be traced across all three (`scanner/README.md` → *Dev Logs and Tracing a Scan*).
+- This is separate from the audit trail (issue #3).
+
 ### Open issues
 - [ ] **Production HTTPS → LAN manager.** Browsers block an `https://` page from calling `http://<LAN-IP>:5050` (mixed content / Private Network Access). `http://localhost` is exempt. Options:
   - run the manager on each device, or

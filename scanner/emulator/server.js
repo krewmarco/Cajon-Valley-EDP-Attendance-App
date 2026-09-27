@@ -15,6 +15,11 @@ class InjectionError extends Error {
     }
 }
 
+function sanitizeRequestId(raw) {
+    if (typeof raw !== 'string') return null;
+    return raw.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64) || null;
+}
+
 function sanitizePayload(raw) {
     if (raw === undefined || raw === null) return '';
     return String(raw).replace(/[^a-zA-Z0-9-]/g, '');
@@ -61,7 +66,7 @@ function createEmulator(overrides = {}) {
     let lastScanEvent = null;
     const scanHistory = [];
 
-    async function simulateBurstKeystroke(payload, suffix = 'ENTER', delayMs = DEFAULT_BURST_DELAY_MS) {
+    async function simulateBurstKeystroke(payload, suffix = 'ENTER', delayMs = DEFAULT_BURST_DELAY_MS, requestId = null) {
         if (!VALID_SUFFIXES.includes(suffix)) {
             throw new InjectionError(400, `Invalid suffix '${suffix}'; expected one of ${VALID_SUFFIXES.join(', ')}`);
         }
@@ -95,6 +100,7 @@ function createEmulator(overrides = {}) {
         const scanEvent = {
             id: `scan_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             station_id: STATION_ID,
+            request_id: requestId,
             student_id: cleanId,
             suffix: suffix,
             typing_speed_ms: clampedDelay,
@@ -115,7 +121,7 @@ function createEmulator(overrides = {}) {
             data: scanEvent
         });
 
-        console.log(`[EMULATOR] Injected ID: ${cleanId} (${scanEvent.chars_sent} chars, ${scanEvent.elapsed_ms}ms, suffix: ${suffix})`);
+        console.log(`[EMULATOR] req=${requestId ?? '-'} Injected ID: ${cleanId} (${scanEvent.chars_sent} chars, ${scanEvent.elapsed_ms}ms, suffix: ${suffix})`);
         return scanEvent;
     }
 
@@ -141,7 +147,7 @@ function createEmulator(overrides = {}) {
         }
 
         try {
-            const result = await simulateBurstKeystroke(student_id, suffix, typing_speed_ms);
+            const result = await simulateBurstKeystroke(student_id, suffix, typing_speed_ms, sanitizeRequestId(req.headers['x-request-id']));
             return res.status(200).json({
                 status: 'INJECTED',
                 message: 'Keystrokes injected into host',
@@ -203,7 +209,8 @@ function createEmulator(overrides = {}) {
                     const result = await simulateBurstKeystroke(
                         data.student_id,
                         data.suffix || 'ENTER',
-                        data.typing_speed_ms ?? DEFAULT_BURST_DELAY_MS
+                        data.typing_speed_ms ?? DEFAULT_BURST_DELAY_MS,
+                        sanitizeRequestId(data.request_id)
                     );
 
                     ws.send(JSON.stringify({

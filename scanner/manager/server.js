@@ -22,6 +22,13 @@ function parseRegistry(config) {
     return stations;
 }
 
+// Correlation ID from the client (X-Request-Id), sanitized for logs; generated if absent
+function requestIdFrom(req) {
+    const raw = req.headers['x-request-id'];
+    const clean = typeof raw === 'string' ? raw.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64) : '';
+    return clean || crypto.randomUUID();
+}
+
 function parseOrigins(config) {
     return (config || '').split(',').map(o => o.trim()).filter(Boolean);
 }
@@ -84,7 +91,7 @@ function createManager(overrides = {}) {
         res.header('Vary', 'Origin');
         if (origin && config.allowedOrigins.includes(origin)) {
             res.header('Access-Control-Allow-Origin', origin);
-            res.header('Access-Control-Allow-Headers', 'Content-Type, X-Manager-Auth');
+            res.header('Access-Control-Allow-Headers', 'Content-Type, X-Manager-Auth, X-Request-Id');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         }
         if (req.method === 'OPTIONS') return res.sendStatus(origin && config.allowedOrigins.includes(origin) ? 204 : 403);
@@ -92,8 +99,9 @@ function createManager(overrides = {}) {
     });
 
     function requireClientAuth(req, res, next) {
+        req.requestId = requestIdFrom(req);
         if (req.headers['x-manager-auth'] !== config.clientToken) {
-            console.log(`[RELAY] ${req.params.stationId} -> 401 (${req.headers['x-manager-auth'] ? 'wrong' : 'missing'} X-Manager-Auth)`);
+            console.log(`[RELAY] req=${req.requestId} ${req.params.stationId} -> 401 (${req.headers['x-manager-auth'] ? 'wrong' : 'missing'} X-Manager-Auth)`);
             return res.status(401).json({ error: 'Unauthorized: Invalid or missing X-Manager-Auth token' });
         }
         next();
@@ -113,9 +121,10 @@ function createManager(overrides = {}) {
     app.post('/api/v1/dongles/:stationId/inject', requireClientAuth, async (req, res) => {
         const stationId = req.params.stationId;
         const station = stations.get(stationId);
+        const requestId = req.requestId;
 
         if (!station) {
-            console.log(`[RELAY] ${stationId} -> 404 (not in DONGLE_REGISTRY)`);
+            console.log(`[RELAY] req=${requestId} ${stationId} -> 404 (not in DONGLE_REGISTRY)`);
             return res.status(404).json({ error: `Station '${stationId}' not found in registry.` });
         }
 
@@ -130,22 +139,24 @@ function createManager(overrides = {}) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Scanner-Auth': config.dongleToken
+                    'X-Scanner-Auth': config.dongleToken,
+                    'X-Request-Id': requestId
                 },
                 body: JSON.stringify({ student_id, suffix, typing_speed_ms }),
                 signal: AbortSignal.timeout(config.requestTimeoutMs)
             });
         } catch (err) {
-            console.log(`[RELAY] ${stationId} student=${student_id} -> FAILED (${err.message})`);
+            console.log(`[RELAY] req=${requestId} ${stationId} student=${student_id} -> FAILED (${err.message})`);
             return res.status(502).json({
                 relay: 'FAILED',
                 station_id: stationId,
+                request_id: requestId,
                 error: `Failed to communicate with dongle at ${station.url}: ${err.message}`
             });
         }
 
         const text = await forwardRes.text();
-        console.log(`[RELAY] ${stationId} student=${student_id} suffix=${suffix} -> ${forwardRes.ok ? 'SUCCESS' : 'REJECTED'} (dongle HTTP ${forwardRes.status})`);
+        console.log(`[RELAY] req=${requestId} ${stationId} student=${student_id} suffix=${suffix} -> ${forwardRes.ok ? 'SUCCESS' : 'REJECTED'} (dongle HTTP ${forwardRes.status})`);
         let data;
         try {
             data = JSON.parse(text);
@@ -156,6 +167,7 @@ function createManager(overrides = {}) {
         return res.status(forwardRes.status).json({
             relay: forwardRes.ok ? 'SUCCESS' : 'REJECTED',
             station_id: stationId,
+            request_id: requestId,
             dongle_response: data
         });
     });

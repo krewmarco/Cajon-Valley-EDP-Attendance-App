@@ -42,7 +42,7 @@ const DongleTestModal = ({ onClose, isLeadMode }: DongleTestModalProps) => {
     const handleTest = async () => {
         setBusy(true);
         setResult(null);
-        const res = await injectBarcode(testId, {}, settings);
+        const res = await injectBarcode(testId, {}, settings, { source: 'test' });
         setBusy(false);
         setResult(res.ok
             ? { ok: true, text: `Sent ${testId} to ${settings.stationId}` }

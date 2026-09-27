@@ -15,6 +15,7 @@ import {
     refreshDongleStatus,
     type ScannerSettings,
 } from './scannerDongleService';
+import { setScannerDevLogSink } from './scannerDevLog';
 
 const require = createRequire(import.meta.url);
 const scannerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scanner');
@@ -43,6 +44,7 @@ describe.skipIf(!hasScannerDeps)('scanner dongle client ↔ scanner/manager + sc
     let manager: any;
     let managerServer: http.Server;
     let settings: ScannerSettings;
+    const devLog: Record<string, any>[] = [];
 
     const student = { id: 'uuid-1', firstName: 'Ava', lastName: 'Lee', elopId: '1042', asesId: 'A1042' } as Student;
 
@@ -55,6 +57,8 @@ describe.skipIf(!hasScannerDeps)('scanner dongle client ↔ scanner/manager + sc
     beforeAll(async () => {
         vi.spyOn(console, 'log').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'debug').mockImplementation(() => {});
+        setScannerDevLogSink(entry => { devLog.push(entry); });
 
         dongle = createEmulator({ authToken: DONGLE_TOKEN, stationId: 'station-1' });
         unpluggedDongle = createEmulator({ authToken: DONGLE_TOKEN, stationId: 'station-2', usbMounted: false });
@@ -88,15 +92,34 @@ describe.skipIf(!hasScannerDeps)('scanner dongle client ↔ scanner/manager + sc
             emulator.wss.close();
             await close(emulator.server);
         }
+        setScannerDevLogSink(undefined);
         vi.restoreAllMocks();
     });
 
     it('a check-in types the student ID on the station dongle', async () => {
         const result = await injectStudentBarcode(student, settings);
-        expect(result).toEqual({ ok: true, charsSent: 5 });
+        expect(result).toEqual({ ok: true, status: 200, charsSent: 5 });
 
         const [event] = await history(dongle);
         expect(event).toMatchObject({ student_id: '1042', suffix: 'ENTER', typing_speed_ms: 12, station_id: 'station-1' });
+    });
+
+    it('one scan can be traced across the app dev log, the manager log, and the dongle', async () => {
+        await new Promise(r => setTimeout(r, 300));
+        const logSpy = vi.mocked(console.log);
+        logSpy.mockClear();
+
+        const result = await injectBarcode('TRACE-1', {}, settings, { source: 'test' });
+        expect(result.ok).toBe(true);
+
+        const scan = devLog.filter(e => e.event_type === 'SCAN').at(-1)!;
+        expect(scan).toMatchObject({ source: 'test', barcode: 'TRACE-1', ok: true, http_status: 200 });
+
+        const [event] = await history(dongle);
+        expect(event).toMatchObject({ student_id: 'TRACE-1', request_id: scan.request_id });
+
+        const relayLines = logSpy.mock.calls.map(args => args.join(' ')).filter(l => l.startsWith('[RELAY]'));
+        expect(relayLines.some(l => l.includes(`req=${scan.request_id}`) && l.includes('SUCCESS'))).toBe(true);
     });
 
     it('a back-to-back scan hits the dongle cooldown and is reported as busy', async () => {

@@ -96,6 +96,22 @@ describe('REST /api/v1/inject', () => {
         assert.equal(body.result.typing_speed_ms, 8);
     });
 
+    test('records the X-Request-Id from the manager on the scan event', async () => {
+        const res = await fetch(`${emulator.baseUrl}/api/v1/inject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Scanner-Auth': TOKEN, 'X-Request-Id': 'req-42' },
+            body: JSON.stringify({ student_id: '1042' })
+        });
+        assert.equal((await res.json()).result.request_id, 'req-42');
+        const { history } = await (await fetch(`${emulator.baseUrl}/api/v1/history`)).json();
+        assert.equal(history[0].request_id, 'req-42');
+    });
+
+    test('request_id is null when no X-Request-Id is sent', async () => {
+        const body = await (await inject(emulator, { student_id: '1042' })).json();
+        assert.equal(body.result.request_id, null);
+    });
+
     test('401 on missing or wrong token', async () => {
         assert.equal((await inject(emulator, { student_id: '1' }, null)).status, 401);
         assert.equal((await inject(emulator, { student_id: '1' }, 'wrong')).status, 401);

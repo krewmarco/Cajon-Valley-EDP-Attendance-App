@@ -163,3 +163,29 @@ Manager API:
 - Browser access is limited to `ALLOWED_ORIGINS` (default `http://localhost:3000`)
 
 Set `USB_MOUNTED=false` on an emulator to simulate an unplugged dongle.
+
+---
+
+## Dev Logs and Tracing a Scan
+
+With the app running under `npm run dev`, every scanner action is written to **`logs/dev-scanner.jsonl`** at the repo root. This file is git-ignored because it holds student IDs, and production builds log nothing.
+
+| Event | When | Key fields |
+|---|---|---|
+| `SCAN` | every Test Scan (`source: "test"`) and check-in scan (`source: "check-in"`) | `request_id`, `station_id`, `barcode`, `ok`, `reason`, `http_status`, `elapsed_ms` |
+| `STATUS_CHANGE` | the header pill changes state (e.g. `ready` → `offline`) | `from`, `to`, `detail` |
+| `SETTINGS_SAVED` | device settings saved in the Scanner modal | URL, station, suffix, speed; **never the token** |
+
+This is a development diagnostic log, **not** the audit trail. Audited student actions go to `logs/dev-audit.jsonl` (and to Google Docs in production); see `docs/GOOGLE_DRIVE_SETUP.md`. Whether scan outcomes belong in the audit trail is tracked in issue #3.
+
+Each scan's `request_id` is sent as `X-Request-Id`, and every hop logs it, so one scan can be followed end to end:
+
+```bash
+tail -f logs/dev-scanner.jsonl | jq -c 'select(.event_type=="SCAN") | {request_id, source, barcode, ok, http_status}'
+docker logs -f edp-dongle-manager | grep RELAY        # [RELAY] req=<request_id> station-alpha-1 ... -> SUCCESS
+docker logs -f edp-scanner-emulator-1 | grep EMULATOR # [EMULATOR] req=<request_id> Injected ID: ...
+curl -s localhost:8080/api/v1/history | jq '.history[] | {request_id, student_id}'
+
+curl -s -X DELETE localhost:3000/__dev/scanner-log    # clear between test runs
+```
+

@@ -27,7 +27,7 @@ Set `VITE_AUDIT_PROVIDERS` (comma-separated, e.g. `local,google-docs`) to choose
 
 ### Reviewing the local log
 
-`npm run dev` prints `Dev audit log: logs/dev-audit.jsonl`. Each line is one event, and photos are replaced with a size marker. The `logs/` folder is git-ignored because it holds student data.
+`npm run dev` prints `Dev log: logs/dev-audit.jsonl`. Scanner dongle activity goes to a separate diagnostic file, `logs/dev-scanner.jsonl`, which is not part of the audit trail (see `scanner/README.md`). Each line is one event, and photos are replaced with a size marker. The `logs/` folder is git-ignored because it holds student data.
 
 ```bash
 tail -f logs/dev-audit.jsonl | jq -c '{event_type, student_name, sent_at}'

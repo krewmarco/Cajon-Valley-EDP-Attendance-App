@@ -21,6 +21,7 @@
  */
 
 import type { Student } from '../types';
+import { logScannerEvent, type ScanSource } from './scannerDevLog';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,15 @@ export function saveSettings(settings: ScannerSettings): void {
     } catch {
         // Private mode / storage disabled: settings last for this session only
     }
+    logScannerEvent({
+        event_type: 'SETTINGS_SAVED',
+        manager_url: settings.managerUrl,
+        station_id: settings.stationId,
+        suffix: settings.suffix,
+        typing_speed_ms: settings.typingSpeedMs,
+        barcode_field: settings.barcodeField,
+        has_client_token: Boolean(settings.clientToken),
+    });
     setState(isConfigured(settings) ? { phase: 'unknown' } : { phase: 'disabled' });
 }
 
@@ -107,9 +117,15 @@ function baseUrl(settings: ScannerSettings): string {
 
 let state: DongleState = { phase: isConfigured() ? 'unknown' : 'disabled' };
 const listeners = new Set<(s: DongleState) => void>();
+// Last phase written to the dev log; 'sending' blips are covered by SCAN events
+let lastLoggedPhase: DonglePhase = state.phase;
 
 function setState(next: DongleState): void {
     state = next;
+    if (next.phase !== 'sending' && next.phase !== lastLoggedPhase) {
+        logScannerEvent({ event_type: 'STATUS_CHANGE', from: lastLoggedPhase, to: next.phase, detail: next.detail });
+        lastLoggedPhase = next.phase;
+    }
     listeners.forEach(l => l(state));
 }
 
@@ -133,6 +149,14 @@ export function barcodeForStudent(student: Student, field: BarcodeField = loadSe
     return sanitizeBarcode(student[field] ?? '');
 }
 
+/** Correlates one scan across the app, manager, and dongle logs. */
+export function newRequestId(): string {
+    // randomUUID only exists in secure contexts (not on plain-http LAN addresses)
+    const c = globalThis.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function clampTypingSpeed(ms: number): number {
     if (!Number.isFinite(ms)) return 8;
     return Math.min(MAX_TYPING_SPEED_MS, Math.max(MIN_TYPING_SPEED_MS, Math.round(ms)));
@@ -142,20 +166,50 @@ export function clampTypingSpeed(ms: number): number {
 
 /**
  * Ask the manager to type `barcode` on this device's station.
- * Resolves (never rejects) with what happened.
+ * Resolves (never rejects) with what happened. Every call is written to the
+ * dev scanner log, tagged with `source`.
  */
 export async function injectBarcode(
     barcode: string,
     overrides: Partial<Pick<ScannerSettings, 'suffix' | 'typingSpeedMs' | 'stationId'>> = {},
     settings: ScannerSettings = loadSettings(),
+    { source = 'test' }: { source?: ScanSource } = {},
 ): Promise<InjectResult> {
     const s = { ...settings, ...overrides };
+    const studentId = sanitizeBarcode(barcode);
+    const typingSpeedMs = clampTypingSpeed(s.typingSpeedMs);
+    const requestId = isConfigured(s) && studentId ? newRequestId() : null;
+    const startedAt = Date.now();
+
+    const result = await sendInject(s, studentId, typingSpeedMs, requestId);
+
+    logScannerEvent({
+        event_type: 'SCAN',
+        source,
+        request_id: requestId,
+        station_id: s.stationId,
+        barcode: studentId,
+        suffix: s.suffix,
+        typing_speed_ms: typingSpeedMs,
+        ok: result.ok,
+        reason: result.reason,
+        http_status: result.status,
+        message: result.message,
+        elapsed_ms: Date.now() - startedAt,
+    });
+    return result;
+}
+
+async function sendInject(
+    s: ScannerSettings,
+    studentId: string,
+    typingSpeedMs: number,
+    requestId: string | null,
+): Promise<InjectResult> {
     if (!isConfigured(s)) {
         return { ok: false, reason: 'not_configured', message: 'Scanner dongle is not configured on this device' };
     }
-
-    const studentId = sanitizeBarcode(barcode);
-    if (!studentId) {
+    if (!studentId || !requestId) {
         return { ok: false, reason: 'no_barcode', message: 'Student has no scannable ID' };
     }
 
@@ -165,11 +219,11 @@ export async function injectBarcode(
     try {
         res = await fetch(`${baseUrl(s)}/api/v1/dongles/${encodeURIComponent(s.stationId)}/inject`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Manager-Auth': s.clientToken },
+            headers: { 'Content-Type': 'application/json', 'X-Manager-Auth': s.clientToken, 'X-Request-Id': requestId },
             body: JSON.stringify({
                 student_id: studentId,
                 suffix: s.suffix,
-                typing_speed_ms: clampTypingSpeed(s.typingSpeedMs),
+                typing_speed_ms: typingSpeedMs,
             }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
@@ -188,7 +242,7 @@ export async function injectBarcode(
 
     if (res.ok && body?.relay === 'SUCCESS') {
         setState({ phase: 'ready', lastCheckedAt: new Date().toISOString() });
-        return { ok: true, charsSent: body?.dongle_response?.result?.chars_sent };
+        return { ok: true, status: res.status, charsSent: body?.dongle_response?.result?.chars_sent };
     }
 
     const message = body?.dongle_response?.error ?? body?.error ?? `HTTP ${res.status}`;
@@ -209,7 +263,7 @@ export async function injectBarcode(
 
 /** Convenience wrapper used by the check-in flow. */
 export function injectStudentBarcode(student: Student, settings: ScannerSettings = loadSettings()): Promise<InjectResult> {
-    return injectBarcode(barcodeForStudent(student, settings.barcodeField), {}, settings);
+    return injectBarcode(barcodeForStudent(student, settings.barcodeField), {}, settings, { source: 'check-in' });
 }
 
 /** Refresh this device's station status from the manager and publish it. */

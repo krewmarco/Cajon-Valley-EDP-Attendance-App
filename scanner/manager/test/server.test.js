@@ -168,11 +168,48 @@ describe('relay', () => {
         });
         assert.equal(preflightOk.status, 204);
         assert.match(preflightOk.headers.get('access-control-allow-headers'), /X-Manager-Auth/);
+        assert.match(preflightOk.headers.get('access-control-allow-headers'), /X-Request-Id/);
 
         const preflightBad = await fetch(`${baseUrl}/api/v1/dongles/station-1/inject`, {
             method: 'OPTIONS', headers: { Origin: 'http://evil.example' }
         });
         assert.equal(preflightBad.status, 403);
+    });
+
+    test('passes the client X-Request-Id to the dongle, logs it, and returns it', async () => {
+        const logs = [];
+        const original = console.log;
+        console.log = (...args) => logs.push(args.join(' '));
+        try {
+            const res = await fetch(`${baseUrl}/api/v1/dongles/station-1/inject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Manager-Auth': CLIENT_TOKEN, 'X-Request-Id': 'abc-123' },
+                body: JSON.stringify({ student_id: '1' })
+            });
+            assert.equal((await res.json()).request_id, 'abc-123');
+        } finally {
+            console.log = original;
+        }
+        assert.equal(dongle.requests[0].headers['x-request-id'], 'abc-123');
+        assert.ok(logs.some(l => l.includes('req=abc-123') && l.includes('SUCCESS')), logs.join('\n'));
+    });
+
+    test('sanitizes a hostile X-Request-Id and generates one when missing', async () => {
+        const original = console.log;
+        console.log = () => {};
+        try {
+            const hostile = await fetch(`${baseUrl}/api/v1/dongles/station-1/inject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Manager-Auth': CLIENT_TOKEN, 'X-Request-Id': 'a;b\\nFAKE LOG' },
+                body: JSON.stringify({ student_id: '1' })
+            });
+            assert.equal((await hostile.json()).request_id, 'abnFAKELOG');
+
+            const missing = await relayInject('station-1', { student_id: '1' });
+            assert.match((await missing.json()).request_id, /^[0-9a-f-]{36}$/);
+        } finally {
+            console.log = original;
+        }
     });
 
     test('dashboard does not embed any token and does not use alert()', async () => {

@@ -15,6 +15,7 @@ import {
     subscribeDongleState,
     type ScannerSettings,
 } from './scannerDongleService';
+import { setScannerDevLogSink } from './scannerDevLog';
 
 const SETTINGS: ScannerSettings = {
     managerUrl: 'http://manager.test:5050/',
@@ -44,16 +45,24 @@ function jsonResponse(status: number, body: unknown): Response {
 const student = { id: 'uuid-1', firstName: 'Ava', lastName: 'Lee', elopId: '1042', asesId: 'A1042' } as Student;
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let devLog: Record<string, any>[];
 
 beforeEach(() => {
     vi.stubGlobal('localStorage', memoryStorage());
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
+    devLog = [];
+    setScannerDevLogSink(entry => { devLog.push(entry); });
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
 });
 
 afterEach(() => {
+    setScannerDevLogSink(undefined);
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
 });
+
+const scans = () => devLog.filter(e => e.event_type === 'SCAN');
 
 describe('settings', () => {
     it('is not configured without URL, token and station', () => {
@@ -120,7 +129,7 @@ describe('injectBarcode', () => {
 
         const result = await injectStudentBarcode(student, { ...SETTINGS, suffix: 'TAB', typingSpeedMs: 50 });
 
-        expect(result).toEqual({ ok: true, charsSent: 5 });
+        expect(result).toEqual({ ok: true, status: 200, charsSent: 5 });
         const [url, init] = fetchMock.mock.calls[0];
         expect(url).toBe('http://manager.test:5050/api/v1/dongles/station-alpha-1/inject');
         expect(init.method).toBe('POST');
@@ -231,5 +240,78 @@ describe('refreshDongleStatus', () => {
         resolveInject(jsonResponse(200, { relay: 'SUCCESS', dongle_response: {} }));
         await pending;
         expect(getDongleState().phase).toBe('ready');
+    });
+});
+
+describe('dev scanner log', () => {
+    it('logs one SCAN per call with a request ID that matches the X-Request-Id header', async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, { relay: 'SUCCESS', dongle_response: {} }));
+
+        await injectStudentBarcode(student, SETTINGS);
+
+        const [scan] = scans();
+        expect(scans()).toHaveLength(1);
+        expect(scan).toMatchObject({
+            source: 'check-in', station_id: 'station-alpha-1', barcode: '1042', suffix: 'ENTER',
+            typing_speed_ms: 8, ok: true, http_status: 200, logged_at: expect.any(String),
+        });
+        expect(scan.request_id).toMatch(/^[a-zA-Z0-9-]{8,}$/);
+        expect(fetchMock.mock.calls[0][1].headers['X-Request-Id']).toBe(scan.request_id);
+        expect(scan.elapsed_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it('uses a fresh request ID per scan', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse(200, { relay: 'SUCCESS', dongle_response: {} }));
+        await injectBarcode('1', {}, SETTINGS);
+        await injectBarcode('2', {}, SETTINGS);
+        expect(scans()[0].request_id).not.toBe(scans()[1].request_id);
+    });
+
+    it('tags test scans and records failures with reason and status', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        fetchMock.mockResolvedValue(jsonResponse(503, { relay: 'REJECTED', dongle_response: { error: 'USB Host not mounted or not ready' } }));
+
+        await injectBarcode('TEST-10042', {}, SETTINGS, { source: 'test' });
+
+        expect(scans()[0]).toMatchObject({
+            source: 'test', ok: false, reason: 'rejected', http_status: 503, message: 'USB Host not mounted or not ready',
+        });
+    });
+
+    it('logs scans that never reach the manager, without a request ID', async () => {
+        await injectBarcode('1042', {}, { ...SETTINGS, clientToken: '' });
+        await injectBarcode('___', {}, SETTINGS);
+        expect(scans().map(e => [e.reason, e.request_id])).toEqual([['not_configured', null], ['no_barcode', null]]);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('logs status changes only on transitions, ignoring the sending blip', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        fetchMock.mockResolvedValue(jsonResponse(200, { relay: 'SUCCESS', dongle_response: {} }));
+        await injectBarcode('1', {}, SETTINGS);            // -> ready
+        await injectBarcode('2', {}, SETTINGS);            // ready -> ready: no event
+        fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+        await injectBarcode('3', {}, SETTINGS);            // -> offline
+
+        const changes = devLog.filter(e => e.event_type === 'STATUS_CHANGE').map(e => e.to);
+        expect(changes.slice(-2)).toEqual(['ready', 'offline']);
+        expect(changes).not.toContain('sending');
+        expect(devLog.filter(e => e.event_type === 'STATUS_CHANGE' && e.to === 'ready')).toHaveLength(1);
+    });
+
+    it('logs settings saves without the token', () => {
+        saveSettings(SETTINGS);
+        const saved = devLog.find(e => e.event_type === 'SETTINGS_SAVED');
+        expect(saved).toMatchObject({ manager_url: SETTINGS.managerUrl, station_id: 'station-alpha-1', has_client_token: true });
+        expect(JSON.stringify(saved)).not.toContain('client-token');
+    });
+
+    it('a broken dev log never affects scanning', async () => {
+        setScannerDevLogSink(() => { throw new Error('sink down'); });
+        fetchMock.mockImplementation(async () => jsonResponse(200, { relay: 'SUCCESS', dongle_response: {} }));
+        await expect(injectBarcode('1042', {}, SETTINGS)).resolves.toMatchObject({ ok: true });
+
+        setScannerDevLogSink(() => Promise.reject(new Error('endpoint missing')));
+        await expect(injectBarcode('1043', {}, SETTINGS)).resolves.toMatchObject({ ok: true });
     });
 });

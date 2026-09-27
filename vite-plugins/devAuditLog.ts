@@ -1,10 +1,14 @@
 // vite-plugins/devAuditLog.ts
-// Dev-server sink for the `local` audit provider. Appends every audit event
-// to logs/dev-audit.jsonl (one JSON object per line) for review while testing:
+// Dev-server sinks that append JSON events (one per line) to files under logs/
+// for review while testing:
 //
-//   POST   /__dev/audit-log   append an event (any client, so LAN tablets can log)
-//   GET    /__dev/audit-log   all events as a JSON array   (this machine only)
-//   DELETE /__dev/audit-log   clear the log                 (this machine only)
+//   /__dev/audit-log    → logs/dev-audit.jsonl    audit trail (`local` audit provider)
+//   /__dev/scanner-log  → logs/dev-scanner.jsonl  scanner dongle activity
+//
+// Each endpoint supports:
+//   POST    append an event (any client, so LAN tablets can log)
+//   GET     all events as a JSON array   (this machine only)
+//   DELETE  clear the log                 (this machine only)
 //
 // Only active under `vite` (serve); production builds have no endpoint.
 import fs from 'node:fs';
@@ -12,6 +16,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { DEV_AUDIT_ENDPOINT } from '../src/services/audit/localAuditProvider';
+import { DEV_SCANNER_LOG_ENDPOINT } from '../src/services/scannerDevLog';
 
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -55,7 +60,7 @@ export function readDevAuditLog(logFile: string): unknown[] {
         .map(line => JSON.parse(line));
 }
 
-export function createDevAuditLogHandler(logFile: string) {
+export function createDevLogHandler(logFile: string) {
     return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         if (req.method === 'POST') {
             const raw = await readBody(req);
@@ -77,7 +82,7 @@ export function createDevAuditLogHandler(logFile: string) {
         }
 
         if (req.method === 'GET' || req.method === 'DELETE') {
-            // The log holds student data; only this machine may read or clear it
+            // The logs hold student data; only this machine may read or clear them
             if (!isLoopback(req.socket.remoteAddress)) return send(res, 403, { error: 'Local access only' });
             if (req.method === 'GET') return send(res, 200, readDevAuditLog(logFile));
             fs.rmSync(logFile, { force: true });
@@ -89,14 +94,23 @@ export function createDevAuditLogHandler(logFile: string) {
     };
 }
 
-export function devAuditLog({ logFile = 'logs/dev-audit.jsonl' }: { logFile?: string } = {}): Plugin {
+export function devAuditLog({
+    auditLogFile = 'logs/dev-audit.jsonl',
+    scannerLogFile = 'logs/dev-scanner.jsonl',
+}: { auditLogFile?: string; scannerLogFile?: string } = {}): Plugin {
     return {
         name: 'edp-dev-audit-log',
         apply: 'serve',
         configureServer(server) {
-            const file = path.resolve(server.config.root, logFile);
-            server.middlewares.use(DEV_AUDIT_ENDPOINT, createDevAuditLogHandler(file));
-            server.config.logger.info(`  Dev audit log: ${path.relative(process.cwd(), file)} (${DEV_AUDIT_ENDPOINT})`);
+            const channels: [string, string][] = [
+                [DEV_AUDIT_ENDPOINT, auditLogFile],
+                [DEV_SCANNER_LOG_ENDPOINT, scannerLogFile],
+            ];
+            for (const [endpoint, logFile] of channels) {
+                const file = path.resolve(server.config.root, logFile);
+                server.middlewares.use(endpoint, createDevLogHandler(file));
+                server.config.logger.info(`  Dev log: ${path.relative(process.cwd(), file)} (${endpoint})`);
+            }
         },
     };
 }
