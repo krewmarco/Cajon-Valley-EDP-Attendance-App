@@ -1,8 +1,8 @@
 # Biometric data and model weights must never be committed (the repo is public)
-data/
-index/
-models/
+/data
+/index
+/models
 reports/*.local.*
-.venv/
+/.venv
 __pycache__/
 .pytest_cache/
