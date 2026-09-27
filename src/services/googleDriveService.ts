@@ -104,6 +104,7 @@ export async function gdLogCheckIn(
     student: Student,
     staff: Staff,
     program: ProgramType,
+    verification?: { method: 'FACE_CONFIRMED' | 'MANUAL'; confidenceScore?: number },
 ): Promise<void> {
     await postEvent('CHECK_IN', {
         student_id: student.id,
@@ -118,6 +119,9 @@ export async function gdLogCheckIn(
         check_in_staff_org: staff.organization,
         attendance_code: student.attendanceCode ?? null,
         has_snack: student.hasSnack,
+        // How identity was established (face check-in demo); null for roster taps
+        verification_method: verification?.method ?? null,
+        confidence_score: verification?.confidenceScore ?? null,
         date: todayLabel(),
         timestamp: nowISO(),
     });

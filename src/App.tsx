@@ -16,6 +16,8 @@ import LeaderDashboard from './components/LeaderDashboard';
 import ParentReportModal from './components/ParentReportModal';
 import DongleStatusPill from './components/DongleStatusPill';
 import DongleTestModal from './components/DongleTestModal';
+import FaceCheckIn, { type CheckInVerification } from './components/FaceCheckIn';
+import { isFaceRecognitionEnabled } from './services/faceRecognitionService';
 import { injectStudentBarcode, describeInjectFailure } from './services/scannerDongleService';
 import { gdLogBehaviorTicket, gdLogBiometric, gdLogCheckIn, gdLogCheckOut, gdLogHeadInjury, gdLogParentReport, gdLogWeCareReport, gdSyncStudentProfile, gdUploadPhoto } from './services/googleDriveService';
 
@@ -61,6 +63,7 @@ const App = () => {
     const [rosterStatusFilter, setRosterStatusFilter] = useState<'all' | 'checked_in' | 'checked_out'>('all');
     const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
     const [showDongleModal, setShowDongleModal] = useState(false);
+    const [showFaceCheckIn, setShowFaceCheckIn] = useState(false);
     // Latest students for timers/closures that would otherwise see stale state (audit logging)
     const studentsRef = useRef(students);
     studentsRef.current = students;
@@ -238,7 +241,7 @@ const App = () => {
         }
     };
 
-    const handleCheckIn = async (studentId: string, photo?: string, biometricData?: any) => {
+    const handleCheckIn = async (studentId: string, photo?: string, biometricData?: any, verification?: CheckInVerification) => {
         const now = new Date();
         const timeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
         const staffName = user ? `${user.name} (${user.organization})` : 'Staff';
@@ -252,7 +255,7 @@ const App = () => {
             const checkedIn: Student = program === 'sunrise'
                 ? { ...scanTarget, sunriseStatus: 'present', sunriseTime: timeString, sunriseStaff: staffName }
                 : { ...scanTarget, sunsetStatus: 'present', sunsetTime: timeString, sunsetStaff: staffName };
-            gdLogCheckIn(checkedIn, user, program);
+            gdLogCheckIn(checkedIn, user, program, verification);
             if (photo) gdUploadPhoto(checkedIn, photo, 'check-in', user);
         }
 
@@ -479,6 +482,11 @@ const App = () => {
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {isFaceRecognitionEnabled() && (
+                            <button onClick={() => setShowFaceCheckIn(true)} style={{ padding: '6px', borderRadius: '10px', border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Face Check-In" aria-label="Face Check-In">
+                                <span className="material-icons-round" style={{ fontSize: '20px' }}>face_retouching_natural</span>
+                            </button>
+                        )}
                         <DongleStatusPill onOpen={() => setShowDongleModal(true)} isLeadMode={isLeadMode} />
                         <div onClick={() => setIsLeadMode(!isLeadMode)} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', borderRadius: '16px', backgroundColor: isLeadMode ? 'rgba(139,92,246,0.1)' : 'var(--bg-hover)', border: `1px solid ${isLeadMode ? '#8b5cf6' : 'var(--border-subtle)'}`, cursor: 'pointer' }}>
                             <span className="material-icons-round" style={{ fontSize: '16px', color: isLeadMode ? '#8b5cf6' : 'var(--text-secondary)' }}>{isLeadMode ? 'admin_panel_settings' : 'person'}</span>
@@ -611,6 +619,18 @@ const App = () => {
 
             {reportData && (
                 <ParentReportModal student={reportData.student} type={reportData.type} onClose={() => setReportData(null)} onSend={(report) => { setParentReports(prev => [...prev, report]); logParentReport(report); showToast('Report sent!', 'success'); setReportData(null); }} onSaveDraft={(report) => { setParentReports(prev => [...prev, report]); logParentReport(report); showToast('Draft saved!', 'info'); setReportData(null); }} staffId={user?.id || 'unknown'} />
+            )}
+
+            {showFaceCheckIn && createPortal(
+                <FaceCheckIn
+                    students={students}
+                    program={program}
+                    canCheckIn={user.role === 'Lead' || staffList.find(s => s.id === user.id)?.canCheckIn !== false}
+                    // No photo is passed: the face check-in never stores a camera frame
+                    onConfirm={(student, verification) => handleCheckIn(student.id, undefined, undefined, verification)}
+                    onClose={() => setShowFaceCheckIn(false)}
+                />,
+                document.body
             )}
 
             {showDongleModal && createPortal(
