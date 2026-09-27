@@ -1,0 +1,3 @@
+# Local dev audit trail (contains student data) — never commit
+*
+!.gitignore

@@ -14,6 +14,38 @@ This guide activates the EDP Attendance App's automatic audit trail. Once set up
 
 ---
 
+## Audit Providers
+
+Every audit event goes through one interface (`AuditProvider` in `src/services/audit/`). The audit log fans each event out to all configured providers; a failing provider never affects the others or the UI.
+
+| Provider | Output | Enabled when |
+|---|---|---|
+| `google-docs` | Per-student Google Docs in Drive, via the Apps Script below | `VITE_GAS_WEBHOOK_URL` is set |
+| `local` | `logs/dev-audit.jsonl` on the developer's machine, via the Vite dev server | Running `npm run dev` |
+
+Set `VITE_AUDIT_PROVIDERS` (comma-separated, e.g. `local,google-docs`) to choose explicitly. When unset, dev mode uses `local`, and `google-docs` is added whenever the webhook URL is set. Production builds never use `local`.
+
+### Reviewing the local log
+
+`npm run dev` prints `Dev audit log: logs/dev-audit.jsonl`. Each line is one event, and photos are replaced with a size marker. The `logs/` folder is git-ignored because it holds student data.
+
+```bash
+tail -f logs/dev-audit.jsonl | jq -c '{event_type, student_name, sent_at}'
+curl -s localhost:3000/__dev/audit-log | jq    # all events (this machine only)
+curl -s -X DELETE localhost:3000/__dev/audit-log  # clear between test runs
+```
+
+### A development Google Doc trail
+
+To see exactly what the district will see in Drive while testing, follow Steps 1–3 below a second time:
+- Use a separate **`EDP Attendance App (DEV)`** folder.
+- Use a separate Apps Script deployment.
+- Put that deployment's URL in your local `.env` as `VITE_GAS_WEBHOOK_URL`.
+
+Your dev server then writes to both the local log and the dev Drive folder. Never point development at the production folder.
+
+---
+
 ## Step 1 — Create the Shared Drive Folder
 
 1. Open [Google Drive](https://drive.google.com) with your Cajon Valley Workspace account.
@@ -123,20 +155,16 @@ After the integration is active, the Drive folder will look like this:
 
 For additional security, set a shared secret token:
 
-1. In the GAS `CONFIG`, set `AUTH_TOKEN` to any long random string (e.g. generate one at [randomkeygen.com](https://randomkeygen.com)).
+1. In the GAS `CONFIG`, set `AUTH_TOKEN` to any long random string (e.g. `openssl rand -hex 24`).
 2. Add the same value to the app's `.env`:
 
 ```env
 VITE_GAS_AUTH_TOKEN=your-random-secret-here
 ```
 
-1. Open `src/services/googleDriveService.ts` and add `auth_token` to the `postEvent` helper body:
+The `google-docs` provider adds it to every event as `auth_token`, and the script rejects requests without it.
 
-```typescript
-body: JSON.stringify({ ...meta, ...payload, auth_token: import.meta.env.VITE_GAS_AUTH_TOKEN }),
-```
-
-The GAS script will reject any request that doesn't include the correct token.
+> **Limits:** `VITE_*` values are compiled into the JavaScript that every browser downloads, and the web app is deployed with **Anyone** access. The token stops casual or accidental posts, but anyone who opens the app can read it. For stronger guarantees, send events through a server-side function that holds the secret.
 
 ---
 
