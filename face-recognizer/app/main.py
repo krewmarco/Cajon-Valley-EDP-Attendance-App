@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 from starlette.formparsers import MultiPartParser
 
 from .embedder import Embedder, OpenCVSFaceEmbedder
@@ -23,6 +25,7 @@ from .quality import check_enrollment_quality
 ROOT = Path(__file__).resolve().parent.parent
 log = logging.getLogger("uvicorn.error")
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+STUDENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 
 
 @dataclass
@@ -36,6 +39,13 @@ class Settings:
     high_threshold: float = float(os.environ.get("HIGH_THRESHOLD", "0.60"))
     # Dev-only webcam test page at /live; also logs per-frame scores (never images)
     live_demo: bool = os.environ.get("LIVE_DEMO") == "1"
+    # Demo only: serve the fake classroom's card photos (build_demo_class.py)
+    demo_gallery: bool = os.environ.get("DEMO_GALLERY") == "1"
+    demo_photos_dir: Path = field(default_factory=lambda: Path(os.environ.get("DEMO_PHOTOS_DIR", ROOT / "demo" / "photos")))
+    # Browser origins allowed to call the API (the attendance app's dev server)
+    allowed_origins: list[str] = field(default_factory=lambda: [
+        o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+    ])
 
 
 def confidence_level(score: float, settings: Settings) -> str:
@@ -64,6 +74,9 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
 
     app = FastAPI(title="EDP Face Recognizer (prototype)")
     app.state.index = index
+    app.add_middleware(
+        CORSMiddleware, allow_origins=settings.allowed_origins, allow_methods=["GET", "POST"], allow_headers=["Content-Type"],
+    )
 
     @app.get("/api/v1/health")
     def health():
@@ -132,6 +145,17 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             ],
             "inference_time_ms": round((time.perf_counter() - started) * 1000, 1),
         }
+
+    @app.get("/api/v1/students/{student_id}/photo", include_in_schema=False)
+    def student_photo(student_id: str):
+        if not settings.demo_gallery:
+            raise HTTPException(404, "Demo gallery is disabled; start the service with DEMO_GALLERY=1")
+        if not STUDENT_ID_PATTERN.fullmatch(student_id):
+            raise HTTPException(400, "Invalid student id")
+        path = settings.demo_photos_dir / f"{student_id}.jpg"
+        if not path.is_file():
+            raise HTTPException(404, f"No demo photo for '{student_id}'")
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
     @app.get("/live", response_class=HTMLResponse, include_in_schema=False)
     def live_page():

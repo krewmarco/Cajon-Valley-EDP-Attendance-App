@@ -217,3 +217,38 @@ def test_live_mode_logs_scores_but_not_images(fake_embedder, caplog):
     assert lines[0].startswith("recognize face=200px top=owner score=") and "level=HIGH" in lines[0]
     assert lines[1].startswith("recognize face=none")
     assert all(len(line) < 200 for line in lines)
+
+
+# ── demo gallery photos + CORS ────────────────────────────────────────────
+def gallery_client(fake_embedder, tmp_path, enabled=True):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    ok, buf = cv2.imencode(".jpg", np.zeros((8, 8, 3), np.uint8))
+    (photos / "3001.jpg").write_bytes(buf.tobytes())
+    (tmp_path / "secret.jpg").write_bytes(b"not for you")
+    settings = Settings(index_dir=None, demo_gallery=enabled, demo_photos_dir=photos, allowed_origins=["http://localhost:3000"])
+    return TestClient(create_app(settings, embedder=fake_embedder))
+
+
+def test_demo_photos_are_off_by_default(fake_embedder, tmp_path):
+    assert gallery_client(fake_embedder, tmp_path, enabled=False).get("/api/v1/students/3001/photo").status_code == 404
+
+
+def test_demo_photo_is_served_when_enabled(fake_embedder, tmp_path):
+    res = gallery_client(fake_embedder, tmp_path).get("/api/v1/students/3001/photo")
+    assert res.status_code == 200 and res.headers["content-type"] == "image/jpeg"
+
+
+@pytest.mark.parametrize("student_id, status", [("9999", 404), ("..%2Fsecret", 400), ("a b", 400), ("x" * 33, 400)])
+def test_demo_photo_rejects_unknown_and_unsafe_ids(fake_embedder, tmp_path, student_id, status):
+    res = gallery_client(fake_embedder, tmp_path).get(f"/api/v1/students/{student_id}/photo")
+    assert res.status_code in (status, 404)
+    assert res.content != b"not for you"
+
+
+def test_cors_allows_only_the_app_origin(fake_embedder, tmp_path):
+    client = gallery_client(fake_embedder, tmp_path)
+    allowed = client.get("/api/v1/health", headers={"Origin": "http://localhost:3000"})
+    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    denied = client.get("/api/v1/health", headers={"Origin": "http://evil.example"})
+    assert "access-control-allow-origin" not in denied.headers

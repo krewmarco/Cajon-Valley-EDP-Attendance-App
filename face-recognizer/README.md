@@ -62,6 +62,23 @@ curl -s -F frame=@some-photo.jpg localhost:8000/api/v1/recognize
 
 Thresholds come from `MATCH_THRESHOLD` / `HIGH_THRESHOLD`, with defaults **0.40 / 0.60** from [`reports/evaluation.md`](reports/evaluation.md). They are measured on one adult, so re-measure before any other use.
 
+## Demo classroom (dev only)
+
+For the district demo ([`plans/demo_face_checkin_plan.md`](../plans/demo_face_checkin_plan.md)):
+
+```bash
+cp demo.developers.example.json demo/developers.json   # edit names/grades; photos in data/developers/<slug>/
+.venv/bin/python scripts/build_demo_class.py            # 30 LFW stand-ins + developers -> demo/, index/, ../supabase/seed.demo.sql
+DEMO_GALLERY=1 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `DEMO_GALLERY=1` | off | serves `GET /api/v1/students/{elop_id}/photo` (card thumbnails from `demo/photos/`; plain IDs only) |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | browser origins allowed by CORS (the attendance app) |
+
+To drop a recognizable face, add its ELOP ID to `demo/exclude.txt` and rebuild.
+
 ## Live webcam test (dev only)
 
 ```bash
